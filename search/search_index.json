@@ -1,0 +1,1 @@
+{"config":{"lang":["en"],"separator":"[\\s\\-]+","pipeline":["stopWordFilter"]},"docs":[{"location":"","title":"noctua-mcp","text":"<p>MCP server for Barista to control Noctua editing</p> <ul> <li>Auto-generated schema documentation</li> </ul>"},{"location":"about/","title":"About noctua-mcp","text":"<p>MCP server for Barista to control Noctua editing</p>"}]}
