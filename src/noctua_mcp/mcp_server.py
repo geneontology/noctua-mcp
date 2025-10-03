@@ -524,7 +524,7 @@ async def remove_fact(
             "gomodel:12345",
             "gomodel:12345/activity1",
             "gomodel:12345/activity2",
-            "RO:0002413"  # directly activates
+            "RO:0002413"  # provides input for
         )
 
         # Remove occurs_in relationship
@@ -532,7 +532,7 @@ async def remove_fact(
             "gomodel:12345",
             "gomodel:12345/mf_123",
             "gomodel:12345/cc_789",
-            "RO:0002432"
+            "BFO:0000066"  # occurs_in
         )
 
         # Remove using variable references (within same batch)
@@ -718,8 +718,8 @@ async def add_basic_pathway(
 
     # Add relationships
     reqs.append(client.req_add_fact(model_id, "mf1", "gp1", "RO:0002333"))  # enabled_by
-    reqs.append(client.req_add_fact(model_id, "mf1", "cc1", "RO:0002432"))  # occurs_in
-    reqs.append(client.req_add_fact(model_id, "mf1", "bp1", "RO:0002434"))  # part_of
+    reqs.append(client.req_add_fact(model_id, "mf1", "cc1", "BFO:0000066"))  # occurs_in
+    reqs.append(client.req_add_fact(model_id, "mf1", "bp1", "BFO:0000050"))  # part_of
 
     # Execute with validation
     expected_individuals = [
@@ -804,7 +804,7 @@ async def add_causal_chain(
             "GO:0004674", "protein serine/threonine kinase activity",
             "UniProtKB:P31749", "AKT1",
             "UniProtKB:P31751", "AKT2",
-            "RO:0002413"  # directly activates
+            "RO:0002629"  # directly positively regulates
         )
 
         # Receptor activating kinase cascade
@@ -824,16 +824,18 @@ async def add_causal_chain(
             "GO:0003700", "DNA-binding transcription factor activity",
             "UniProtKB:P01106", "MYC",
             "UniProtKB:Q01094", "E2F1",
-            "RO:0002630"  # directly inhibits
+            "RO:0002630"  # directly negatively regulates
         )
 
         # Common causal relations:
         # RO:0002411 - causally upstream of (general)
-        # RO:0002413 - directly activates
-        # RO:0002630 - directly inhibits
-        # RO:0002406 - directly regulates
-        # RO:0002407 - indirectly activates
-        # RO:0002409 - indirectly inhibits
+        # RO:0002629 - directly positively regulates
+        # RO:0002630 - directly negatively regulates
+        # RO:0002413 - provides input for
+        # RO:0002407 - indirectly positively regulates
+        # RO:0002409 - indirectly negatively regulates
+        # RO:0002304 - causally upstream of, positive effect
+        # RO:0002305 - causally upstream of, negative effect
 
     Notes:
         - All labels are required to prevent ID hallucination
@@ -923,10 +925,10 @@ async def model_summary(model_id: str) -> Dict[str, Any]:
         #   "individual_count": 42,
         #   "fact_count": 67,
         #   "predicate_distribution": {
-        #     "RO:0002333": 15,  # enabled_by
+        #     "RO:0002333": 15,  # enabled_by (note: not in vetted list)
         #     "RO:0002411": 8,   # causally upstream of
-        #     "RO:0002432": 12,  # occurs_in
-        #     "RO:0002434": 5    # part_of
+        #     "BFO:0000066": 12,  # occurs_in
+        #     "BFO:0000050": 5    # part_of
         #   }
         # }
 
@@ -938,7 +940,9 @@ async def model_summary(model_id: str) -> Dict[str, Any]:
         # Analyze model complexity
         result = model_summary("gomodel:12345")
         causal_edges = result["predicate_distribution"].get("RO:0002411", 0)
-        causal_edges += result["predicate_distribution"].get("RO:0002413", 0)
+        causal_edges += result["predicate_distribution"].get("RO:0002413", 0)  # provides input for
+        causal_edges += result["predicate_distribution"].get("RO:0002629", 0)  # directly positively regulates
+        causal_edges += result["predicate_distribution"].get("RO:0002630", 0)  # directly negatively regulates
         print(f"Model has {causal_edges} causal relationships")
     """
     client = get_client()

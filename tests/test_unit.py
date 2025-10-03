@@ -281,8 +281,8 @@ async def test_add_basic_pathway_request_sequence():
         # Check facts created
         assert len(fact_calls) == 3
         assert ("model123", "mf1", "gp1", "RO:0002333") in fact_calls  # enabled_by
-        assert ("model123", "mf1", "cc1", "RO:0002432") in fact_calls  # occurs_in
-        assert ("model123", "mf1", "bp1", "RO:0002434") in fact_calls  # part_of
+        assert ("model123", "mf1", "cc1", "BFO:0000066") in fact_calls  # occurs_in
+        assert ("model123", "mf1", "bp1", "BFO:0000050") in fact_calls  # part_of
 
 
 def test_prompts():
