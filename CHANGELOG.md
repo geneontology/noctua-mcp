@@ -6,7 +6,7 @@
 - **`create_model` tool**: Create new empty GO-CAM models with optional titles
   - Generates new model IDs automatically
   - Returns model ID for use with other tools
-  - Integrates with `get_noctua_url` from gocam-ai for easy access to Noctua editor
+  - Integrates with `get_noctua_url` from noctua-py for easy access to Noctua editor
 
 ### Enhanced
 - **Comprehensive examples in all tool docstrings**:
@@ -21,9 +21,9 @@
   - `examples/usage_examples.md` - Comprehensive usage guide
 
 ### Changed
-- Refactored to use gocam-ai as the core library
-- MCP server is now a thin shim layer over gocam-ai
-- All business logic moved to upstream gocam-ai library
+- Refactored to use noctua-py as the core library
+- MCP server is now a thin shim layer over noctua-py
+- All business logic moved to upstream noctua-py library
 
 ### Fixed
 - Live tests now properly skip when BARISTA_TOKEN is invalid
@@ -35,5 +35,5 @@
 - Tests cover all major functionality including model creation
 
 ## Dependencies
-- Now depends on gocam-ai library (local path)
+- Now depends on noctua-py library (local path)
 - Requires BARISTA_TOKEN environment variable for privileged operations

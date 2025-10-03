@@ -2,7 +2,7 @@
 
 MCP server for GO-CAM model editing via the Barista API.
 
-This package provides a thin MCP (Model Context Protocol) wrapper around the [gocam-ai](https://github.com/geneontology/gocam-ai) library, exposing GO-CAM editing capabilities through a standardized interface.
+This package provides a thin MCP (Model Context Protocol) wrapper around the [noctua-py](https://github.com/geneontology/noctua-py) library, exposing GO-CAM editing capabilities through a standardized interface.
 
 ## Quick Start
 
@@ -71,13 +71,13 @@ MCP Client (e.g., Claude)
     ↓
 noctua-mcp (this package)
     ↓
-gocam-ai library
+noctua-py library
     ↓
 Barista API / Noctua
 ```
 
-All core logic resides in the `gocam-ai` library. This MCP server only:
-1. Exposes gocam-ai functionality through MCP tools
+All core logic resides in the `noctua-py` library. This MCP server only:
+1. Exposes noctua-py functionality through MCP tools
 2. Manages client singleton
 3. Provides prompts for common patterns
 
@@ -107,7 +107,7 @@ Tests are divided into:
 ## Development
 
 ```bash
-# Install dependencies including gocam-ai from local path
+# Install dependencies including noctua-py from local path
 uv sync
 
 # Run the server
@@ -132,7 +132,7 @@ LLMs and agent clients.
 Useful links:
 - [MCP Specification](https://github.com/modelcontextprotocol/spec)
 - [FastMCP Documentation](https://gofastmcp.com/getting-started/welcome)
-- [gocam-ai Library](https://github.com/geneontology/gocam-ai)
+- [noctua-py Library](https://github.com/geneontology/noctua-py)
 
 ## Best Practices
 
