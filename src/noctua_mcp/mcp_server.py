@@ -27,6 +27,7 @@ mcp = FastMCP(
     instructions="""
 Noctua MCP Server provides tools for editing GO-CAM models via the Barista API.
 Use these tools to create and edit GO-CAM models with individuals, facts, and evidence.
+This also provides tools for finding relevant genes and gene products (entities) for use in the model.
 
 Available operations:
 - Create new empty GO-CAM models
@@ -228,10 +229,19 @@ async def add_individual(
             "class_curie": class_curie
         }
 
+    # Extract the actual individual ID from the response
+    individual_id = assign_var  # Default to the variable name
+    if hasattr(resp, 'raw') and resp.raw:
+        data = resp.raw.get('data', {})
+        individuals = data.get('individuals', [])
+        if individuals and len(individuals) > 0:
+            # Get the first individual's ID (the one we just created)
+            individual_id = individuals[0].get('id', assign_var)
+
     # Return minimal success response
     return {
         "success": True,
-        "individual_id": resp.individual_id if hasattr(resp, 'individual_id') else assign_var,
+        "individual_id": individual_id,
         "class_curie": class_curie,
         "assign_var": assign_var
     }
@@ -635,7 +645,7 @@ async def get_model(model_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def add_basic_pathway(
+async def add_activity_unit(
     model_id: str,
     pathway_curie: str,
     pathway_label: str,

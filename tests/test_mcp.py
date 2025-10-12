@@ -75,7 +75,7 @@ async def test_server_starts_and_lists_tools() -> None:
             "remove_individual",
             "remove_fact",
             "get_model",
-            "add_basic_pathway",
+            "add_activity_unit",
             "add_causal_chain",
             "model_summary",
             "search_models",
@@ -234,8 +234,8 @@ async def test_model_summary_mock():
 
 
 @pytest.mark.asyncio
-async def test_add_basic_pathway_mock():
-    """Test add_basic_pathway creates correct request sequence."""
+async def test_add_activity_unit_mock():
+    """Test add_activity_unit creates correct request sequence."""
     import sys
     sys.path.insert(0, "src")
 
@@ -262,7 +262,7 @@ async def test_add_basic_pathway_mock():
 
         mcp_server._client = None
 
-        result = await mcp_server.add_basic_pathway.fn(
+        result = await mcp_server.add_activity_unit.fn(
             model_id="gomodel:12345",
             pathway_curie="GO:0016055",
             pathway_label="Wnt signaling pathway",
@@ -331,6 +331,165 @@ async def test_add_causal_chain_mock():
         assert mock_instance.req_add_fact.call_count == 3
 
         assert result["success"] is True
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_live_create_model_with_components() -> None:
+    """Live end-to-end test: create model, add GP/MF/CC/BP, and connect with facts."""
+    token = os.environ.get("BARISTA_TOKEN")
+    if not token:
+        pytest.skip("BARISTA_TOKEN not set; skipping live test")
+
+    client = Client(SERVER_PATH)
+    async with client:
+        # Configure token
+        await client.call_tool("configure_token", {"token": token})
+
+        # Step 1: Create a new model
+        create_result = await client.call_tool("create_model", {
+            "title": "Test model for MCP integration"
+        })
+
+        if hasattr(create_result, 'data'):
+            data = create_result.data
+            if "error" in data:
+                if "bad token" in str(data).lower():
+                    pytest.skip("Invalid BARISTA_TOKEN; skipping live test")
+                assert False, f"Failed to create model: {data}"
+
+            assert "model_id" in data
+            model_id = data["model_id"]
+
+            # Step 2: Add molecular function (protein serine/threonine kinase activity)
+            mf_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "torc2_activity",
+                "class_curie": "GO:0004674",
+                "class_label": "protein serine/threonine kinase activity"
+            })
+
+            mf_id = None
+            if hasattr(mf_result, 'data'):
+                mf_data = mf_result.data
+                assert "success" in mf_data
+                assert mf_data["success"] is True
+                # Get the actual individual ID
+                mf_id = mf_data.get("individual_id", "torc2_activity")
+                print(f"MF individual created: {mf_id}")
+
+            # Step 3: Add gene product (tor1 from PomBase)
+            gp_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "tor1_gp",
+                "class_curie": "PomBase:SPBC30D10.10c",
+                "class_label": "tor1 Spom"
+            })
+
+            gp_id = None
+            if hasattr(gp_result, 'data'):
+                gp_data = gp_result.data
+                assert "success" in gp_data
+                assert gp_data["success"] is True
+                # Get the actual individual ID
+                gp_id = gp_data.get("individual_id", "tor1_gp")
+                print(f"GP individual created: {gp_id}")
+
+            # Step 4: Add cellular component (cytoplasm)
+            cc_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "cytoplasm",
+                "class_curie": "GO:0005737",
+                "class_label": "cytoplasm"
+            })
+
+            cc_id = None
+            if hasattr(cc_result, 'data'):
+                cc_data = cc_result.data
+                assert "success" in cc_data
+                assert cc_data["success"] is True
+                # Get the actual individual ID
+                cc_id = cc_data.get("individual_id", "cytoplasm")
+                print(f"CC individual created: {cc_id}")
+
+            # Step 5: Add biological process (TOR signaling)
+            bp_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "tor_signaling",
+                "class_curie": "GO:0031929",
+                "class_label": "TOR signaling"
+            })
+
+            bp_id = None
+            if hasattr(bp_result, 'data'):
+                bp_data = bp_result.data
+                assert "success" in bp_data
+                assert bp_data["success"] is True
+                # Get the actual individual ID
+                bp_id = bp_data.get("individual_id", "tor_signaling")
+                print(f"BP individual created: {bp_id}")
+
+            # Step 6: Add enabled_by relationship (MF enabled_by GP)
+            # Use the actual individual IDs, not the variable names
+            enabled_by_result = await client.call_tool("add_fact", {
+                "model_id": model_id,
+                "subject_id": mf_id,
+                "object_id": gp_id,
+                "predicate_id": "RO:0002333"
+            })
+
+            if hasattr(enabled_by_result, 'data'):
+                eb_data = enabled_by_result.data
+                if "error" in eb_data:
+                    print(f"Error in add_fact: {eb_data}")
+                assert "success" in eb_data, f"add_fact failed: {eb_data}"
+                if not eb_data.get("success"):
+                    print(f"add_fact returned success=False: {eb_data}")
+                assert eb_data["success"] is True
+
+            # Step 7: Add occurs_in relationship (MF occurs_in CC)
+            occurs_in_result = await client.call_tool("add_fact", {
+                "model_id": model_id,
+                "subject_id": mf_id,
+                "object_id": cc_id,
+                "predicate_id": "BFO:0000066"
+            })
+
+            if hasattr(occurs_in_result, 'data'):
+                oi_data = occurs_in_result.data
+                assert "success" in oi_data
+                assert oi_data["success"] is True
+
+            # Step 8: Add part_of relationship (MF part_of BP)
+            part_of_result = await client.call_tool("add_fact", {
+                "model_id": model_id,
+                "subject_id": mf_id,
+                "object_id": bp_id,
+                "predicate_id": "BFO:0000050"
+            })
+
+            if hasattr(part_of_result, 'data'):
+                po_data = part_of_result.data
+                assert "success" in po_data
+                assert po_data["success"] is True
+
+            # Step 9: Verify the model was created correctly
+            summary_result = await client.call_tool("model_summary", {"model_id": model_id})
+
+            if hasattr(summary_result, 'data'):
+                summary_data = summary_result.data
+                assert "individual_count" in summary_data
+                assert summary_data["individual_count"] >= 4  # MF, GP, CC, BP
+                assert "fact_count" in summary_data
+                assert summary_data["fact_count"] >= 3  # enabled_by, occurs_in, part_of
+
+                # Check predicate distribution
+                preds = summary_data.get("predicate_distribution", {})
+                assert "RO:0002333" in preds  # enabled_by
+                assert "BFO:0000066" in preds  # occurs_in
+                assert "BFO:0000050" in preds  # part_of
+        else:
+            assert False, f"Unexpected response type: {type(create_result)}"
 
 
 # Live tests (require BARISTA_TOKEN and network access)

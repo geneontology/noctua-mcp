@@ -225,8 +225,8 @@ async def test_model_summary_error_handling():
 
 
 @pytest.mark.asyncio
-async def test_add_basic_pathway_request_sequence():
-    """Test that add_basic_pathway creates the correct sequence of requests."""
+async def test_add_activity_unit_request_sequence():
+    """Test that add_activity_unit creates the correct sequence of requests."""
     import noctua_mcp.mcp_server as mcp_server
 
     with patch("noctua_mcp.mcp_server.BaristaClient") as MockClient:
@@ -259,7 +259,7 @@ async def test_add_basic_pathway_request_sequence():
 
         mcp_server._client = None
 
-        await mcp_server.add_basic_pathway.fn(
+        await mcp_server.add_activity_unit.fn(
             model_id="model123",
             pathway_curie="GO:0016055",
             pathway_label="Wnt signaling pathway",
