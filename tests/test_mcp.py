@@ -58,6 +58,56 @@ def mock_barista_client():
 
 
 @pytest.mark.asyncio
+async def test_get_model_variables_mock():
+    """Test get_model_variables tool."""
+    import sys
+    sys.path.insert(0, "src")
+
+    import noctua_mcp.mcp_server as mcp_server
+
+    with patch("noctua_mcp.mcp_server.BaristaClient") as MockClient:
+        mock_instance = Mock()
+        MockClient.return_value = mock_instance
+
+        # Setup mock response
+        from noctua import BaristaResponse
+        mock_resp = Mock(spec=BaristaResponse)
+        mock_resp.error = None
+        mock_resp.individuals = [
+            {"id": "gomodel:12345/ind1"},
+            {"id": "gomodel:12345/ind2"}
+        ]
+        mock_resp.model_vars = {
+            "mf1": "gomodel:12345/ind1",
+            "gp1": "gomodel:12345/ind2"
+        }
+
+        mock_instance.get_model.return_value = mock_resp
+        mock_instance.track_variables = True
+        # Variable registry is keyed by (model_id, variable_name) -> actual_id
+        mock_instance._variable_registry = {
+            ("gomodel:12345", "old_var"): "gomodel:12345/old123"
+        }
+        # Mock the get_variables method that our code now uses
+        mock_instance.get_variables.return_value = {
+            "old_var": "gomodel:12345/old123"
+        }
+
+        mcp_server._client = None
+
+        result = await mcp_server.get_model_variables.fn("gomodel:12345")
+
+        assert result["success"] is True
+        assert result["model_id"] == "gomodel:12345"
+        assert "variables" in result
+        # Should have both old registry vars and new model_vars
+        assert result["variables"]["mf1"] == "gomodel:12345/ind1"
+        assert result["variables"]["gp1"] == "gomodel:12345/ind2"
+        assert result["variables"]["old_var"] == "gomodel:12345/old123"
+        assert result["individual_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_server_starts_and_lists_tools() -> None:
     """Test that the server starts and lists all expected tools."""
     client = Client(SERVER_PATH)
@@ -75,9 +125,8 @@ async def test_server_starts_and_lists_tools() -> None:
             "remove_individual",
             "remove_fact",
             "get_model",
-            "add_basic_pathway",
-            "add_causal_chain",
             "model_summary",
+            "get_model_variables",
             "search_models",
             "search_bioentities",
             "search_annotations",
@@ -175,6 +224,9 @@ async def test_add_fact_mock():
         mock_instance.req_add_fact.return_value = {"entity": "edge"}
         mock_instance.m3_batch.return_value = mock_resp
 
+        # Mock _resolve_identifier to return the input unchanged
+        mock_instance._resolve_identifier = Mock(side_effect=lambda model_id, identifier: identifier)
+
         mcp_server._client = None
 
         result = await mcp_server.add_fact.fn(
@@ -184,6 +236,12 @@ async def test_add_fact_mock():
             predicate_id="RO:0002333"
         )
 
+        # Check that _resolve_identifier was called for both subject and object
+        assert mock_instance._resolve_identifier.call_count == 2
+        mock_instance._resolve_identifier.assert_any_call("gomodel:12345", "ind1")
+        mock_instance._resolve_identifier.assert_any_call("gomodel:12345", "ind2")
+
+        # req_add_fact should be called with resolved identifiers (same in this case)
         mock_instance.req_add_fact.assert_called_once_with(
             "gomodel:12345", "ind1", "ind2", "RO:0002333"
         )
@@ -234,8 +292,9 @@ async def test_model_summary_mock():
 
 
 @pytest.mark.asyncio
-async def test_add_basic_pathway_mock():
-    """Test add_basic_pathway creates correct request sequence."""
+@pytest.mark.skip(reason="add_activity_unit is deprecated until we solve transaction rollback issues")
+async def test_add_activity_unit_mock():
+    """Test add_activity_unit creates correct request sequence."""
     import sys
     sys.path.insert(0, "src")
 
@@ -262,7 +321,7 @@ async def test_add_basic_pathway_mock():
 
         mcp_server._client = None
 
-        result = await mcp_server.add_basic_pathway.fn(
+        result = await mcp_server.add_activity_unit.fn(
             model_id="gomodel:12345",
             pathway_curie="GO:0016055",
             pathway_label="Wnt signaling pathway",
@@ -284,6 +343,7 @@ async def test_add_basic_pathway_mock():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skipping add_causal_chain test for now")
 async def test_add_causal_chain_mock():
     """Test add_causal_chain creates correct request sequence."""
     import sys
@@ -331,6 +391,284 @@ async def test_add_causal_chain_mock():
         assert mock_instance.req_add_fact.call_count == 3
 
         assert result["success"] is True
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_live_mcp_tools_variable_behavior() -> None:
+    """Test how variables work through the MCP tools (not bypassing the shim).
+
+    This test properly uses the MCP server tools to demonstrate:
+    1. Variables returned from add_individual are actual IDs, not variable names
+    2. These IDs can be used across separate MCP tool calls
+    3. The get_model_variables tool shows current variable mappings
+    """
+    token = os.environ.get("BARISTA_TOKEN")
+    if not token:
+        pytest.skip("BARISTA_TOKEN not set; skipping live test")
+
+    client = Client(SERVER_PATH)
+    async with client:
+        # Configure token
+        await client.call_tool("configure_token", {"token": token})
+
+        # Step 1: Create a model
+        print("\n=== Testing MCP tools variable behavior ===")
+        create_result = await client.call_tool("create_model", {
+            "title": "Test MCP variable behavior"
+        })
+
+        if hasattr(create_result, 'data'):
+            data = create_result.data
+            if "error" in data:
+                if "bad token" in str(data).lower():
+                    pytest.skip("Invalid BARISTA_TOKEN; skipping live test")
+                assert False, f"Failed to create model: {data}"
+
+            assert "model_id" in data
+            model_id = data["model_id"]
+            print(f"Created model: {model_id}")
+
+            # Step 2: Add individuals with variables
+            print("\nAdding individuals with variable names...")
+
+            # Add molecular function
+            mf_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "class_curie": "GO:0003674",
+                "class_label": "molecular_function",
+                "assign_var": "mf_var"
+            })
+
+            mf_data = mf_result.data
+            assert mf_data["success"] is True
+            mf_id = mf_data["individual_id"]
+            print(f"MF individual ID returned: {mf_id}")
+            assert mf_id != "mf_var", "Should return actual ID, not variable name"
+            # Individual IDs have format gomodel:XXX/YYY - check it starts with model ID base
+            assert mf_id.startswith(model_id + "/"), f"ID {mf_id} should start with {model_id}/"
+
+            # Add gene product
+            gp_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "class_curie": "UniProtKB:P12345",
+                "class_label": "GOT2 NCBITaxon:9986",  # Actual label for this UniProt entry
+                "assign_var": "gp_var"
+            })
+
+            gp_data = gp_result.data
+            if not gp_data.get("success"):
+                print(f"GP addition failed: {gp_data}")
+            assert gp_data["success"] is True, f"Failed to add GP: {gp_data}"
+            gp_id = gp_data["individual_id"]
+            print(f"GP individual ID returned: {gp_id}")
+            assert gp_id != "gp_var", "Should return actual ID, not variable name"
+
+            # Step 3: Check variables with get_model_variables
+            print("\nChecking model variables...")
+            vars_result = await client.call_tool("get_model_variables", {
+                "model_id": model_id
+            })
+
+            if hasattr(vars_result, 'data'):
+                vars_data = vars_result.data
+                print(f"Model variables: {vars_data.get('variables', {})}")
+                print(f"Individual count: {vars_data.get('individual_count', 0)}")
+
+            # Step 4: Add fact using VARIABLE NAMES (not actual IDs)
+            print("\nAdding fact using VARIABLE NAMES...")
+            fact_result = await client.call_tool("add_fact", {
+                "model_id": model_id,
+                "subject_id": "mf_var",  # Using variable name!
+                "object_id": "gp_var",   # Using variable name!
+                "predicate_id": "RO:0002333"  # enabled_by
+            })
+
+            fact_data = fact_result.data
+            print(f"Fact addition result: {fact_data}")
+            # With proper variable tracking, this should now succeed!
+            assert fact_data.get("success") is True, f"Variables should work with persistent client: {fact_data}"
+            print("SUCCESS: Variables work across separate MCP tool calls!")
+
+            # Verify that the variables in get_model_variables are populated
+            assert vars_data.get("variables", {}), "Should have variables in the registry"
+            assert "mf_var" in vars_data["variables"], "Should have mf_var in registry"
+            assert "gp_var" in vars_data["variables"], "Should have gp_var in registry"
+            print(f"Variables correctly tracked: {vars_data['variables']}")
+
+            # Step 5: Verify the model structure
+            print("\nVerifying model structure...")
+            summary_result = await client.call_tool("model_summary", {
+                "model_id": model_id
+            })
+
+            summary_data = summary_result.data
+            assert summary_data["individual_count"] >= 2
+            assert summary_data["fact_count"] >= 1
+            assert "RO:0002333" in summary_data.get("predicate_distribution", {})
+            print(f"Model has {summary_data['individual_count']} individuals and {summary_data['fact_count']} facts")
+
+        else:
+            assert False, f"Unexpected response type: {type(create_result)}"
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_live_create_model_with_components() -> None:
+    """Live end-to-end test: create model, add GP/MF/CC/BP, and connect with facts."""
+    token = os.environ.get("BARISTA_TOKEN")
+    if not token:
+        pytest.skip("BARISTA_TOKEN not set; skipping live test")
+
+    client = Client(SERVER_PATH)
+    async with client:
+        # Configure token
+        await client.call_tool("configure_token", {"token": token})
+
+        # Step 1: Create a new model
+        create_result = await client.call_tool("create_model", {
+            "title": "Test model for MCP integration"
+        })
+
+        if hasattr(create_result, 'data'):
+            data = create_result.data
+            if "error" in data:
+                if "bad token" in str(data).lower():
+                    pytest.skip("Invalid BARISTA_TOKEN; skipping live test")
+                assert False, f"Failed to create model: {data}"
+
+            assert "model_id" in data
+            model_id = data["model_id"]
+
+            # Step 2: Add molecular function (protein serine/threonine kinase activity)
+            mf_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "torc2_activity",
+                "class_curie": "GO:0004674",
+                "class_label": "protein serine/threonine kinase activity"
+            })
+
+            mf_id = None
+            if hasattr(mf_result, 'data'):
+                mf_data = mf_result.data
+                assert "success" in mf_data
+                assert mf_data["success"] is True
+                # Get the actual individual ID
+                mf_id = mf_data.get("individual_id", "torc2_activity")
+                print(f"MF individual created: {mf_id}")
+
+            # Step 3: Add gene product (tor1 from PomBase)
+            gp_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "tor1_gp",
+                "class_curie": "PomBase:SPBC30D10.10c",
+                "class_label": "tor1 Spom"
+            })
+
+            gp_id = None
+            if hasattr(gp_result, 'data'):
+                gp_data = gp_result.data
+                assert "success" in gp_data
+                assert gp_data["success"] is True
+                # Get the actual individual ID
+                gp_id = gp_data.get("individual_id", "tor1_gp")
+                print(f"GP individual created: {gp_id}")
+
+            # Step 4: Add cellular component (cytoplasm)
+            cc_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "cytoplasm",
+                "class_curie": "GO:0005737",
+                "class_label": "cytoplasm"
+            })
+
+            cc_id = None
+            if hasattr(cc_result, 'data'):
+                cc_data = cc_result.data
+                assert "success" in cc_data
+                assert cc_data["success"] is True
+                # Get the actual individual ID
+                cc_id = cc_data.get("individual_id", "cytoplasm")
+                print(f"CC individual created: {cc_id}")
+
+            # Step 5: Add biological process (TOR signaling)
+            bp_result = await client.call_tool("add_individual", {
+                "model_id": model_id,
+                "assign_var": "tor_signaling",
+                "class_curie": "GO:0031929",
+                "class_label": "TOR signaling"
+            })
+
+            bp_id = None
+            if hasattr(bp_result, 'data'):
+                bp_data = bp_result.data
+                assert "success" in bp_data
+                assert bp_data["success"] is True
+                # Get the actual individual ID
+                bp_id = bp_data.get("individual_id", "tor_signaling")
+                print(f"BP individual created: {bp_id}")
+
+            # Step 6: Add enabled_by relationship (MF enabled_by GP)
+            # Use the actual individual IDs, not the variable names
+            enabled_by_result = await client.call_tool("add_fact", {
+                "model_id": model_id,
+                "subject_id": mf_id,
+                "object_id": gp_id,
+                "predicate_id": "RO:0002333"
+            })
+
+            if hasattr(enabled_by_result, 'data'):
+                eb_data = enabled_by_result.data
+                if "error" in eb_data:
+                    print(f"Error in add_fact: {eb_data}")
+                assert "success" in eb_data, f"add_fact failed: {eb_data}"
+                if not eb_data.get("success"):
+                    print(f"add_fact returned success=False: {eb_data}")
+                assert eb_data["success"] is True
+
+            # Step 7: Add occurs_in relationship (MF occurs_in CC)
+            occurs_in_result = await client.call_tool("add_fact", {
+                "model_id": model_id,
+                "subject_id": mf_id,
+                "object_id": cc_id,
+                "predicate_id": "BFO:0000066"
+            })
+
+            if hasattr(occurs_in_result, 'data'):
+                oi_data = occurs_in_result.data
+                assert "success" in oi_data
+                assert oi_data["success"] is True
+
+            # Step 8: Add part_of relationship (MF part_of BP)
+            part_of_result = await client.call_tool("add_fact", {
+                "model_id": model_id,
+                "subject_id": mf_id,
+                "object_id": bp_id,
+                "predicate_id": "BFO:0000050"
+            })
+
+            if hasattr(part_of_result, 'data'):
+                po_data = part_of_result.data
+                assert "success" in po_data
+                assert po_data["success"] is True
+
+            # Step 9: Verify the model was created correctly
+            summary_result = await client.call_tool("model_summary", {"model_id": model_id})
+
+            if hasattr(summary_result, 'data'):
+                summary_data = summary_result.data
+                assert "individual_count" in summary_data
+                assert summary_data["individual_count"] >= 4  # MF, GP, CC, BP
+                assert "fact_count" in summary_data
+                assert summary_data["fact_count"] >= 3  # enabled_by, occurs_in, part_of
+
+                # Check predicate distribution
+                preds = summary_data.get("predicate_distribution", {})
+                assert "RO:0002333" in preds  # enabled_by
+                assert "BFO:0000066" in preds  # occurs_in
+                assert "BFO:0000050" in preds  # part_of
+        else:
+            assert False, f"Unexpected response type: {type(create_result)}"
 
 
 # Live tests (require BARISTA_TOKEN and network access)

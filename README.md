@@ -18,11 +18,76 @@ For development:
 uv run noctua-mcp serve
 ```
 
+## Docker Deployment
+
+### Building the Container
+
+```bash
+docker build -t noctua-mcp .
+```
+
+### Running with Docker
+
+```bash
+docker run -e BARISTA_TOKEN="your-token" noctua-mcp
+```
+
+### Environment Variables
+
+- `BARISTA_TOKEN`: Authentication token for Barista API (required)
+- `BARISTA_BASE`: Barista base URL (default: http://barista-dev.berkeleybop.org)
+- `BARISTA_NAMESPACE`: Minerva namespace (default: minerva_public_dev)
+- `BARISTA_PROVIDED_BY`: Provided-by agent (default: http://geneontology.org)
+
+## Smithery.ai Deployment
+
+This server is configured for deployment on [smithery.ai](https://smithery.ai) using the included `smithery.yaml` configuration.
+
+### How it Works
+
+When installed via smithery.ai, users configure their credentials through their MCP client (like Claude Desktop):
+
+1. Install the noctua-mcp server from smithery.ai
+2. Configure your `BARISTA_TOKEN` in your MCP client settings
+3. The token is passed to the server when it starts
+
+The `smithery.yaml` configuration:
+- Defines how users provide their Barista API token
+- Specifies Docker-based deployment
+- Uses stdio-based MCP protocol communication
+- Allows users to optionally configure the Barista server URL and namespace
+
+## How MCP Servers Work with Credentials
+
+MCP servers receive configuration from the **client** (e.g., Claude Desktop, Claude Code), not from environment variables on the server side. This means:
+
+1. **Users provide their credentials** in their MCP client configuration
+2. **The client passes these credentials** to the server when starting it
+3. **The server receives credentials** as environment variables at startup
+
+This keeps credentials secure and user-specific - each user provides their own API token.
+
 ### Using with Claude Code
 
 1. **Configure the MCP server**: The project includes a `.mcp.json` configuration file that tells Claude Code how to run the server.
 
-2. **Set your Barista token**: You'll need to set the `BARISTA_TOKEN` environment variable before starting Claude Code:
+2. **Set your Barista token in your MCP configuration**:
+
+   For Claude Desktop, add to your config:
+   ```json
+   {
+     "noctua-mcp": {
+       "type": "stdio",
+       "command": "uvx",
+       "args": ["noctua-mcp"],
+       "env": {
+         "BARISTA_TOKEN": "your-barista-token-here"
+       }
+     }
+   }
+   ```
+
+   Or set it in your shell before starting Claude Code:
    ```bash
    export BARISTA_TOKEN="your-barista-token-here"
    claude-code /path/to/noctua-mcp
