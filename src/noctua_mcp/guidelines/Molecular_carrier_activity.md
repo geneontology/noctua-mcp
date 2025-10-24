@@ -38,4 +38,4 @@ The same information is captured for the carrier activity and its context; howev
 
 Review date: 2023-07-25
 
-Reviewed by: Cristina Casals, Pasclae Gaudet, Patrick Masson
+Reviewed by: Cristina Casals, Pascale Gaudet, Patrick Masson
