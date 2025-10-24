@@ -1541,7 +1541,7 @@ def _inject_guideline_list(content: str, title: str) -> str:
         return content
 
     # Create formatted list
-    guideline_section = f"\n\n## Available GO-CAM Guidelines\n\n"
+    guideline_section = "\n\n## Available GO-CAM Guidelines\n\n"
     guideline_section += f"This is the '{title}' guideline. Other available guidelines include:\n\n"
 
     for guide in guidelines:
