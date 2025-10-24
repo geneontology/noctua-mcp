@@ -790,7 +790,15 @@ async def add_activity_unit(
     }
 
 
-#buggy - can make dupes due to partial rollback
+# NOTE: This function is currently commented out and not registered as an MCP tool due to a known bug.
+# BUG DESCRIPTION:
+#   - The function can create duplicate molecular function and gene product individuals in the GO-CAM model.
+#   - This occurs when a partial rollback happens after a validation failure or error during the multi-step creation process.
+#   - Not all changes are reliably reverted, so some individuals or facts may remain, leading to duplicate entries if the function is retried.
+#   - The bug is most likely to occur when the model is in a partially valid state or when network/database errors interrupt the process.
+#   - This function is retained in the codebase for future debugging and as a reference for the intended causal chain creation logic.
+#   - Do NOT uncomment or register this function as a tool until the rollback logic is fixed and thoroughly tested.
+#   - See issue tracker #<insert-issue-number-if-applicable> for more details and progress on resolving this bug.
 #@mcp.tool()
 async def add_causal_chain(
     model_id: str,
