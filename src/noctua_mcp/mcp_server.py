@@ -17,10 +17,14 @@ Transport
 """
 
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from fastmcp import FastMCP
 from noctua import BaristaClient
 from noctua.amigo import AmigoClient
+
+# Path to guidelines directory
+GUIDELINES_DIR = Path(__file__).parent / "guidelines"
 
 mcp = FastMCP(
     "noctua-mcp",
@@ -153,7 +157,7 @@ async def create_model(
         # Pathway editor without token (URL encoded model ID)
         from urllib.parse import quote
         encoded_id = quote(resp.model_id, safe="")
-        result["pathway_editor_url"] = f"http://noctua.geneontology.org/workbench/noctua-visual-pathway-editor/?model_id={encoded_id}"
+        result["pathway_editor_url"] = f"http://noctua-dev.berkeleybop.org/workbench/noctua-visual-pathway-editor/?model_id={encoded_id}"
 
     return result
 
@@ -229,14 +233,10 @@ async def add_individual(
             "class_curie": class_curie
         }
 
-    # Extract the actual individual ID from the response
+    # Get the actual individual ID from model_vars
     individual_id = assign_var  # Default to the variable name
-    if hasattr(resp, 'raw') and resp.raw:
-        data = resp.raw.get('data', {})
-        individuals = data.get('individuals', [])
-        if individuals and len(individuals) > 0:
-            # Get the first individual's ID (the one we just created)
-            individual_id = individuals[0].get('id', assign_var)
+    if hasattr(resp, 'model_vars') and resp.model_vars:
+        individual_id = resp.model_vars.get(assign_var, assign_var)
 
     # Return minimal success response
     return {
@@ -303,7 +303,12 @@ async def add_fact(
         add_fact("gomodel:12345", "gomodel:12345/abc123", "gomodel:12345/def456", "RO:0002333")
     """
     client = get_client()
-    req = client.req_add_fact(model_id, subject_id, object_id, predicate_id)
+
+    # Resolve any variables to actual IDs
+    resolved_subject = client._resolve_identifier(model_id, subject_id)
+    resolved_object = client._resolve_identifier(model_id, object_id)
+
+    req = client.req_add_fact(model_id, resolved_subject, resolved_object, predicate_id)
     resp = client.m3_batch([req])
 
     if resp.validation_failed:
@@ -644,7 +649,8 @@ async def get_model(model_id: str) -> Dict[str, Any]:
     }
 
 
-@mcp.tool()
+# buggy - dupes due to partial rollback
+#@mcp.tool()
 async def add_activity_unit(
     model_id: str,
     pathway_curie: str,
@@ -772,7 +778,8 @@ async def add_activity_unit(
     }
 
 
-@mcp.tool()
+#buggy - can make dupes due to partial rollback
+#@mcp.tool()
 async def add_causal_chain(
     model_id: str,
     mf1_curie: str,
@@ -994,6 +1001,83 @@ async def model_summary(model_id: str) -> Dict[str, Any]:
         "individual_count": len(individuals),
         "fact_count": len(facts),
         "predicate_distribution": predicate_counts,
+    }
+
+
+@mcp.tool()
+async def get_model_variables(model_id: str) -> Dict[str, Any]:
+    """
+    Get the currently bound variables for a GO-CAM model.
+
+    Returns a mapping of variable names to their actual individual IDs.
+    This is useful for understanding what variables are available in the
+    current model context, especially after batch operations.
+
+    Args:
+        model_id: The GO-CAM model identifier
+
+    Returns:
+        Dictionary with variable mappings and model information
+
+    Examples:
+        # Get variables after creating individuals
+        vars = get_model_variables("gomodel:12345")
+        # Returns:
+        # {
+        #   "model_id": "gomodel:12345",
+        #   "variables": {
+        #     "mf1": "gomodel:12345/68dee4d300000481",
+        #     "gp1": "gomodel:12345/68dee4d300000482",
+        #     "cc1": "gomodel:12345/68dee4d300000483"
+        #   },
+        #   "individual_count": 3
+        # }
+
+        # Use the variables in subsequent operations
+        vars = get_model_variables("gomodel:12345")
+        mf_id = vars["variables"]["mf1"]
+        add_fact("gomodel:12345", mf_id, vars["variables"]["gp1"], "RO:0002333")
+
+    Notes:
+        - Variables are only valid within the same batch operation
+        - This tool helps identify actual IDs for cross-batch operations
+        - If the model has no tracked variables, returns empty dict
+    """
+    client = get_client()
+
+    # Check if the client has variable tracking enabled
+    if not hasattr(client, 'track_variables') or not client.track_variables:
+        client.track_variables = True
+
+    # Get the model to see current state
+    resp = client.get_model(model_id)
+
+    if resp.error:
+        return {
+            "success": False,
+            "error": resp.error,
+            "model_id": model_id
+        }
+
+    # Get variables from the client's registry
+    variables = {}
+    if hasattr(client, '_variable_registry') and client._variable_registry:
+        # The registry is keyed by (model_id, variable_name) -> actual_id
+        # We need to extract variables for this specific model
+        variables = client.get_variables(model_id)
+
+    # Also check if the last response has model_vars
+    if hasattr(resp, 'model_vars') and resp.model_vars:
+        variables.update(resp.model_vars)
+
+    # Count individuals
+    individual_count = len(resp.individuals) if resp.individuals else 0
+
+    return {
+        "success": True,
+        "model_id": model_id,
+        "variables": variables,
+        "individual_count": individual_count,
     }
 
 
@@ -1440,6 +1524,174 @@ def add_evidence_prompt() -> str:
 2. Provide an ECO code (e.g., ECO:0000353 for IPI)
 3. Include source references (e.g., PMID:12345)
 """
+
+
+# Resources for GO-CAM guidelines
+def _get_available_guidelines() -> List[str]:
+    """Get list of available guideline files."""
+    if not GUIDELINES_DIR.exists():
+        return []
+    return sorted([f.stem for f in GUIDELINES_DIR.glob("*.md")])
+
+
+def _inject_guideline_list(content: str, title: str) -> str:
+    """Inject list of available guidelines at the end of content."""
+    guidelines = _get_available_guidelines()
+    if not guidelines:
+        return content
+
+    # Create formatted list
+    guideline_section = f"\n\n## Available GO-CAM Guidelines\n\n"
+    guideline_section += f"This is the '{title}' guideline. Other available guidelines include:\n\n"
+
+    for guide in guidelines:
+        # Skip the current one
+        if guide == title:
+            continue
+        # Make the filename more readable
+        readable_name = guide.replace("_", " ").replace("-", " ")
+        guideline_section += f"- {readable_name}\n"
+
+    guideline_section += "\nUse the `get_guideline_content` tool to access any specific guideline."
+
+    return content + guideline_section
+
+
+@mcp.resource("guidelines://modeling-best-practices")
+async def get_modeling_guidelines() -> str:
+    """GO-CAM modeling best practices and general guidelines."""
+    # Try multiple possible filenames
+    possible_files = [
+        "GO-CAM_annotation_guidelines_README.md",
+        "GO-CAM_modelling_guidelines_TO_DO.md",
+        "WIP_-_Regulation_and_Regulatory_Processes_in_GO-CAM.md"
+    ]
+
+    for filename in possible_files:
+        file_path = GUIDELINES_DIR / filename
+        if file_path.exists():
+            with open(file_path) as f:
+                content = f.read()
+            return _inject_guideline_list(content, file_path.stem)
+
+    # If none found, return a generic message with list
+    return _inject_guideline_list(
+        "# GO-CAM Modeling Guidelines\n\nNo main guideline file found.",
+        "modeling-best-practices"
+    )
+
+
+@mcp.resource("guidelines://evidence-requirements")
+async def get_evidence_guidelines() -> str:
+    """Evidence code usage and requirements for GO-CAM."""
+    # Look for E3 ubiquitin ligases as it contains evidence info
+    file_path = GUIDELINES_DIR / "E3_ubiquitin_ligases.md"
+    if file_path.exists():
+        with open(file_path) as f:
+            content = f.read()
+        return _inject_guideline_list(content, file_path.stem)
+
+    # Fallback with list
+    return _inject_guideline_list(
+        "# Evidence Requirements\n\nNo evidence guideline file found.",
+        "evidence-requirements"
+    )
+
+
+@mcp.resource("guidelines://complex-annotations")
+async def get_complex_guidelines() -> str:
+    """Guidelines for annotating protein complexes in GO-CAM."""
+    file_path = GUIDELINES_DIR / "How_to_annotate_complexes_in_GO-CAM.md"
+    if file_path.exists():
+        with open(file_path) as f:
+            content = f.read()
+        return _inject_guideline_list(content, file_path.stem)
+
+    return _inject_guideline_list(
+        "# Complex Annotation Guidelines\n\nNo complex guideline file found.",
+        "complex-annotations"
+    )
+
+
+@mcp.tool()
+async def list_guidelines() -> Dict[str, List[str]]:
+    """List all available GO-CAM guideline documents.
+
+    Returns a list of available guideline names that can be accessed
+    using the get_guideline_content tool.
+
+    Returns:
+        Dictionary with 'guidelines' key containing list of available guidelines
+
+    Examples:
+        # List all available guidelines
+        result = list_guidelines()
+        for guide in result['guidelines']:
+            print(guide)
+    """
+    guidelines = _get_available_guidelines()
+
+    return {
+        "guidelines": guidelines,
+        "count": len(guidelines),
+        "note": "Use get_guideline_content(guideline_name) to fetch any guideline"
+    }
+
+
+@mcp.tool()
+async def get_guideline_content(guideline_name: str) -> Dict[str, Any]:
+    """Fetch specific GO-CAM guideline content.
+
+    Args:
+        guideline_name: Name of guideline file (without .md extension).
+                       Use list_guidelines() to see available options.
+
+    Returns:
+        Dictionary with guideline content or error message
+
+    Examples:
+        # Get a specific guideline
+        content = get_guideline_content("E3_ubiquitin_ligases")
+
+        # Get transcription factor guidelines
+        content = get_guideline_content("DNA-binding_transcription_factor_activity_annotation_guidelines")
+    """
+    file_path = GUIDELINES_DIR / f"{guideline_name}.md"
+
+    if not file_path.exists():
+        available = _get_available_guidelines()
+        return {
+            "success": False,
+            "error": f"Guideline '{guideline_name}' not found",
+            "available_guidelines": available,
+            "hint": "Use one of the available guideline names listed above"
+        }
+
+    try:
+        with open(file_path) as f:
+            content = f.read()
+
+        # Extract first heading as description
+        lines = content.split('\n')
+        description = ""
+        for line in lines:
+            if line.strip():
+                description = line.strip('#').strip()
+                break
+
+        return {
+            "success": True,
+            "guideline_name": guideline_name,
+            "description": description,
+            "content": content,
+            "length": len(content)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to read guideline: {str(e)}",
+            "guideline_name": guideline_name
+        }
 
 
 if __name__ == "__main__":

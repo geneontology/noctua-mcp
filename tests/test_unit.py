@@ -225,6 +225,7 @@ async def test_model_summary_error_handling():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="add_activity_unit is deprecated until we solve transaction rollback issues")
 async def test_add_activity_unit_request_sequence():
     """Test that add_activity_unit creates the correct sequence of requests."""
     import noctua_mcp.mcp_server as mcp_server
