@@ -1614,7 +1614,7 @@ async def get_complex_guidelines() -> str:
 
 
 @mcp.tool()
-async def list_guidelines() -> Dict[str, List[str]]:
+async def list_guidelines() -> Dict[str, Any]:
     """List all available GO-CAM guideline documents.
 
     Returns a list of available guideline names that can be accessed
