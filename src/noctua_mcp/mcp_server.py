@@ -649,7 +649,19 @@ async def get_model(model_id: str) -> Dict[str, Any]:
     }
 
 
-# buggy - dupes due to partial rollback
+# NOTE: The following function is intentionally commented out and preserved for future reference.
+# BUG DESCRIPTION:
+# The add_activity_unit tool is currently buggy: it can create duplicate activity units in the GO-CAM model
+# due to incomplete rollback logic when an error occurs during multi-step model updates.
+# Specifically, if any part of the pathway unit creation fails, partial changes may remain,
+# resulting in duplicate molecular function (MF), gene product (GP), or cellular component (CC) individuals or facts.
+# 
+# FUTURE PLANS:
+# - Refactor the function to ensure atomicity: either all steps succeed, or all changes are rolled back.
+# - Add checks to prevent duplicate individuals and relationships.
+# - Consider using transactions or temporary model states if supported by the Barista API.
+# 
+# Until these issues are resolved, this function should not be enabled.
 #@mcp.tool()
 async def add_activity_unit(
     model_id: str,
