@@ -22,6 +22,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 from noctua import BaristaClient
 from noctua.amigo import AmigoClient
+from noctua.models import ProteinComplexComponent, EntitySetMember
 
 # Path to guidelines directory
 GUIDELINES_DIR = Path(__file__).parent / "guidelines"
@@ -38,9 +39,11 @@ Available operations:
 - Add individuals (instances) of GO/ECO terms
 - Add facts (edges) between individuals
 - Add evidence to facts
+- Add protein complexes with validated components
+- Add entity sets (functionally interchangeable entities)
 - Remove individuals and facts
 - Query model structure
-- Create common GO-CAM patterns (e.g., basic pathway units)
+- Search for bioentities and annotations
 
 """
 )
@@ -99,22 +102,9 @@ async def create_model(
         Barista API response containing the new model ID and editor URLs
 
     Examples:
-        # Create a new model with a title
-        response = create_model("RAS-RAF signaling pathway")
-        model_id = response["data"]["id"]
-        print(f"Graph editor: {response['graph_editor_url']}")
-        print(f"Pathway editor: {response['pathway_editor_url']}")
 
-        # Create a model with a descriptive title
-        response = create_model("Human Wnt signaling pathway")
-
-        # Create an unnamed model
-        response = create_model()
-
-        # Extract the model ID from response
-        if response["message-type"] == "success":
-            model_id = response["data"]["id"]
-            print(f"Created model: {model_id}")
+    - `create_model("RAS-RAF signaling pathway")`
+      
 
     Notes:
         - The returned model_id can be used with other tools like add_individual
@@ -212,8 +202,7 @@ async def add_individual(
         - This prevents corrupt models from incorrect IDs
     """
     client = get_client()
-    expected_type = {"id": class_curie, "label": class_label}
-    resp = client.add_individual_validated(model_id, class_curie, expected_type, assign_var)
+    resp = client.add_individual(model_id, class_curie, assign_var, expected_label=class_label)
 
     if resp.validation_failed:
         return {
@@ -233,10 +222,13 @@ async def add_individual(
             "class_curie": class_curie
         }
 
-    # Get the actual individual ID from model_vars
-    individual_id = assign_var  # Default to the variable name
-    if hasattr(resp, 'model_vars') and resp.model_vars:
-        individual_id = resp.model_vars.get(assign_var, assign_var)
+    # Get the actual individual ID from model_vars or from the individuals list
+    individual_id = assign_var
+    if resp.model_vars and assign_var in resp.model_vars:
+        individual_id = resp.model_vars[assign_var]
+    elif resp.individuals and len(resp.individuals) > 0:
+        # If model_vars is empty, get the ID from the last individual (the one just created)
+        individual_id = resp.individuals[-1].id
 
     # Return minimal success response
     return {
@@ -445,6 +437,257 @@ async def add_evidence_to_fact(
 
 
 @mcp.tool()
+async def add_protein_complex(
+    model_id: str,
+    components: List[Dict[str, Any]],
+    assign_var: str = "complex1"
+) -> Dict[str, Any]:
+    """
+    Add a protein complex to a GO-CAM model with validated components.
+
+    Creates a protein-containing complex (GO:0032991 by default) and links
+    all components using BFO:0000051 (has part) relation. The operation is
+    atomic - either all components are added successfully or the entire
+    operation is rolled back.
+
+    Args:
+        model_id: The GO-CAM model identifier
+        components: List of component dictionaries with keys:
+                   - entity_id (required): Protein/gene product ID (e.g., "UniProtKB:P12345")
+                   - label (optional): Component label for validation
+                   - evidence_type (optional): ECO code (e.g., "ECO:0000353")
+                   - reference (optional): Source reference (e.g., "PMID:12345678")
+        assign_var: Variable name for the complex (default: "complex1")
+
+    Returns:
+        Barista API response with complex ID and component IDs
+
+    Examples:
+        # Create a simple dimer complex
+        add_protein_complex(
+            "gomodel:12345",
+            [
+                {"entity_id": "UniProtKB:P04637", "label": "TP53"},
+                {"entity_id": "UniProtKB:P04637", "label": "TP53"}
+            ],
+        )
+
+        # Create complex with evidence
+        add_protein_complex(
+            "gomodel:12345",
+            [
+                {
+                    "entity_id": "UniProtKB:P68400",
+                    "label": "CSNK1A1",
+                    "evidence_type": "ECO:0000353",
+                    "reference": "PMID:12345678"
+                },
+                {
+                    "entity_id": "UniProtKB:P49841",
+                    "label": "GSK3B",
+                    "evidence_type": "ECO:0000353",
+                    "reference": "PMID:12345678"
+                }
+            ],
+            assign_var="destruction_complex"
+        )
+
+        # Create a complex with specific assignment variable
+        add_protein_complex(
+            "gomodel:12345",
+            [
+                {"entity_id": "UniProtKB:P62191", "label": "PSMC1"},
+                {"entity_id": "UniProtKB:P62195", "label": "PSMC5"}
+            ],
+            assign_var="proteasome"
+        )
+
+    Notes:
+        - All components must have entity_id specified
+        - Label validation prevents ID hallucination
+        - Evidence and references are optional but recommended
+        - Uses BFO:0000051 (has part) to link components
+        - Atomic operation with automatic rollback on failure
+    """
+    client = get_client()
+
+    # Convert component dicts to Pydantic models
+    try:
+        pydantic_components = [ProteinComplexComponent(**comp) for comp in components]
+    except Exception as e:
+        return {
+            "success": False,
+            "error": "Invalid component structure",
+            "reason": str(e),
+            "hint": "Each component must have 'entity_id' field. Optional: 'label', 'evidence_type', 'reference'"
+        }
+
+    # Call the new add_protein_complex method
+    resp = client.add_protein_complex(
+        model_id,
+        pydantic_components,
+        assign_var=assign_var
+    )
+
+    if resp.validation_failed:
+        return {
+            "success": False,
+            "error": "Validation failed",
+            "reason": resp.validation_reason,
+            "rolled_back": True,
+            "component_count": len(components)
+        }
+
+    if resp.error:
+        return {
+            "success": False,
+            "error": resp.error,
+            "model_id": model_id
+        }
+
+    # Get the complex ID from model_vars or from the individuals list
+    complex_id = assign_var
+    if resp.model_vars and assign_var in resp.model_vars:
+        complex_id = resp.model_vars[assign_var]
+    elif resp.individuals and len(resp.individuals) > 0:
+        # Find the complex individual (it should be the first one created in this operation)
+        # The complex is created first, then components are added
+        for ind in resp.individuals:
+            # Check if it's a protein-containing complex
+            if hasattr(ind, 'type') and any('GO:0032991' in str(t.id) if hasattr(t, 'id') else False for t in ind.type):
+                complex_id = ind.id
+                break
+
+    return {
+        "success": True,
+        "complex_id": complex_id,
+        "component_count": len(components),
+        "assign_var": assign_var
+    }
+
+
+@mcp.tool()
+async def add_entity_set(
+    model_id: str,
+    members: List[Dict[str, Any]],
+    assign_var: str = "set1"
+) -> Dict[str, Any]:
+    """
+    Add an entity set to a GO-CAM model with validated members.
+
+    Creates an entity set (CHEBI:33695 "information biomacromolecule" by default)
+    representing functionally interchangeable entities. Links members using
+    RO:0019003 (has substitutable entity) relation. The operation is atomic -
+    either all members are added successfully or the entire operation is rolled back.
+
+    Args:
+        model_id: The GO-CAM model identifier
+        members: List of member dictionaries with keys:
+                - entity_id (required): Entity ID (e.g., "UniProtKB:P12345")
+                - label (optional): Member label for validation
+                - evidence_type (optional): ECO code (e.g., "ECO:0000353")
+                - reference (optional): Source reference (e.g., "PMID:12345678")
+        assign_var: Variable name for the set (default: "set1")
+
+    Returns:
+        Barista API response with set ID and member IDs
+
+    Examples:
+        # Create a set of functionally equivalent kinases
+        add_entity_set(
+            "gomodel:12345",
+            [
+                {"entity_id": "UniProtKB:P31749", "label": "AKT1"},
+                {"entity_id": "UniProtKB:P31751", "label": "AKT2"},
+                {"entity_id": "UniProtKB:Q9Y243", "label": "AKT3"}
+            ],
+            assign_var="akt_isoforms"
+        )
+
+        # Create set with evidence
+        add_entity_set(
+            "gomodel:12345",
+            [
+                {
+                    "entity_id": "UniProtKB:P04637",
+                    "label": "TP53",
+                    "evidence_type": "ECO:0000314",
+                    "reference": "PMID:87654321"
+                },
+                {
+                    "entity_id": "UniProtKB:P04049",
+                    "label": "RAF1",
+                    "evidence_type": "ECO:0000314",
+                    "reference": "PMID:87654321"
+                }
+            ],
+        )
+
+    Notes:
+        - All members must have entity_id specified
+        - Label validation prevents ID hallucination
+        - Evidence and references are optional but recommended
+        - Uses RO:0019003 (has substitutable entity) to link members
+        - Atomic operation with automatic rollback on failure
+        - Entity sets represent functionally interchangeable entities
+    """
+    client = get_client()
+
+    # Convert member dicts to Pydantic models
+    try:
+        pydantic_members = [EntitySetMember(**member) for member in members]
+    except Exception as e:
+        return {
+            "success": False,
+            "error": "Invalid member structure",
+            "reason": str(e),
+            "hint": "Each member must have 'entity_id' field. Optional: 'label', 'evidence_type', 'reference'"
+        }
+
+    # Call the new add_entity_set method
+    resp = client.add_entity_set(
+        model_id,
+        pydantic_members,
+        assign_var=assign_var,
+    )
+
+    if resp.validation_failed:
+        return {
+            "success": False,
+            "error": "Validation failed",
+            "reason": resp.validation_reason,
+            "rolled_back": True,
+            "member_count": len(members)
+        }
+
+    if resp.error:
+        return {
+            "success": False,
+            "error": resp.error,
+            "model_id": model_id,
+        }
+
+    # Get the set ID from model_vars or from the individuals list
+    set_id = assign_var
+    if resp.model_vars and assign_var in resp.model_vars:
+        set_id = resp.model_vars[assign_var]
+    elif resp.individuals and len(resp.individuals) > 0:
+        # Find the set individual - it should be the first one created
+        # Look for an entity set (typically CHEBI:33695 or similar)
+        for ind in resp.individuals:
+            if hasattr(ind, 'type') and any('CHEBI' in str(t.id) if hasattr(t, 'id') else False for t in ind.type):
+                set_id = ind.id
+                break
+
+    return {
+        "success": True,
+        "set_id": set_id,
+        "member_count": len(members),
+        "assign_var": assign_var
+    }
+
+
+@mcp.tool()
 async def remove_individual(
     model_id: str,
     individual_id: str
@@ -616,14 +859,13 @@ async def get_model(model_id: str) -> Dict[str, Any]:
 
         # Find all molecular functions
         mfs = [i for i in individuals
-               if any("GO:0003674" in str(e) for e in i.get("expressions", []))]
+               if any("GO:0003674" in str(e.id) for e in i.type if hasattr(e, 'id'))]
 
-        # Find all enabled_by relationships
-        enabled_by = [f for f in facts if f["property"] == "RO:0002333"]
+        # Find all enabled_by relationships (facts are Pydantic objects)
+        enabled_by = [f for f in facts if f.property == "RO:0002333"]
 
         # Check model state
-        annotations = model["data"].get("annotations", [])
-        state = next((a["value"] for a in annotations if a["key"] == "state"), None)
+        state = model["data"].get("state")
     """
     client = get_client()
     resp = client.get_model(model_id)
@@ -1008,7 +1250,8 @@ async def model_summary(model_id: str) -> Dict[str, Any]:
     # Count predicates
     predicate_counts: Dict[str, int] = {}
     for fact in facts:
-        pred = fact.get("property", "unknown")
+        # fact is now a Pydantic Fact object, not a dict
+        pred = fact.property if hasattr(fact, 'property') else "unknown"
         predicate_counts[pred] = predicate_counts.get(pred, 0) + 1
 
     # Get model state if available

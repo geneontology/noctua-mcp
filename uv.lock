@@ -2549,7 +2549,7 @@ wheels = [
 
 [[package]]
 name = "noctua"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "gocam" },
@@ -2562,9 +2562,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/78/ea/ddd5e35c8993952525fa76e372e64f3eed78da5d87b6d0690ade01ad4d59/noctua-0.1.1.tar.gz", hash = "sha256:725163387a4b08e6521192c89bce77faea0ca70dd4cb41ce888f03bcd04cbe18", size = 1547602 }
+sdist = { url = "https://files.pythonhosted.org/packages/26/4b/bf5b7ae0ef6256c71bbe2acbe7912bdff07dd58ca8e69ccddf8411c002ca/noctua-0.1.2.tar.gz", hash = "sha256:07b3358026465d0729b3edfebfebdf6a19490ec861ab45f1d9b0d6ded49a378c", size = 1553791 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/12/73ee9c8db65bddd9a46954dfba8a2c41aeccc73c444d28ba682ba412f191/noctua-0.1.1-py3-none-any.whl", hash = "sha256:7a249588e9682d3c5b16f8cc4cb883549645e7a4444756d1b4e0865088bb665a", size = 43420 },
+    { url = "https://files.pythonhosted.org/packages/ce/90/c62fc382bdd3fb482646e34f2149f2d918efdf3b3df112a2b00eff62ef8b/noctua-0.1.2-py3-none-any.whl", hash = "sha256:793b3d1b1fe573f3c6ebf27c9fa57f487ec38809948c4ed43ba026838bc4521b", size = 52007 },
 ]
 
 [[package]]
@@ -2597,7 +2597,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.119.0" },
     { name = "fastmcp", specifier = ">=2.12.4" },
     { name = "linkml-runtime", specifier = ">=1.9.4" },
-    { name = "noctua", specifier = ">=0.1.1,<0.2" },
+    { name = "noctua", specifier = ">=0.1.2" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "typer", specifier = ">=0.9.0" },
     { name = "uvicorn", specifier = ">=0.37.0" },
