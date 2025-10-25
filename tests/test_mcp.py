@@ -168,6 +168,7 @@ async def test_add_individual_mock():
         mock_resp.error = None
         mock_resp.individual_id = "mf1"
         mock_resp.raw = {"message-type": "success", "signal": "merge"}
+        mock_resp.model_vars = {"mf1": "gomodel:12345/abc123"}
 
         mock_instance.req_add_individual.return_value = {
             "entity": "individual",
@@ -175,8 +176,8 @@ async def test_add_individual_mock():
         }
         mock_instance.m3_batch.return_value = mock_resp
 
-        # Mock add_individual_validated
-        mock_instance.add_individual_validated.return_value = mock_resp
+        # Mock add_individual with new signature
+        mock_instance.add_individual.return_value = mock_resp
 
         # Reset the client
         mcp_server._client = None
@@ -189,13 +190,13 @@ async def test_add_individual_mock():
             assign_var="mf1"
         )
 
-        # Verify calls - should use add_individual_validated
-        mock_instance.add_individual_validated.assert_called_once_with(
-            "gomodel:12345", "GO:0003674", {"id": "GO:0003674", "label": "molecular_function"}, "mf1"
+        # Verify calls - should use add_individual with expected_label
+        mock_instance.add_individual.assert_called_once_with(
+            "gomodel:12345", "GO:0003674", "mf1", expected_label="molecular_function"
         )
 
         assert result["success"] is True
-        assert result["individual_id"] == "mf1"
+        assert result["individual_id"] == "gomodel:12345/abc123"
 
 
 @pytest.mark.asyncio
@@ -262,6 +263,8 @@ async def test_model_summary_mock():
         MockClient.return_value = mock_instance
 
         from noctua import BaristaResponse
+        from noctua.models import Fact
+
         mock_resp = Mock(spec=BaristaResponse)
         mock_resp.validation_failed = False
         mock_resp.validation_reason = None
@@ -270,10 +273,11 @@ async def test_model_summary_mock():
         mock_resp.individuals = [
             {"id": "ind1"}, {"id": "ind2"}, {"id": "ind3"}
         ]
+        # Create Fact objects instead of dicts
         mock_resp.facts = [
-            {"property": "RO:0002333"},
-            {"property": "RO:0002333"},
-            {"property": "RO:0002432"},
+            Fact(subject="s1", object="o1", property="RO:0002333"),
+            Fact(subject="s2", object="o2", property="RO:0002333"),
+            Fact(subject="s3", object="o3", property="RO:0002432"),
         ]
         mock_resp.model_state = "production"
 

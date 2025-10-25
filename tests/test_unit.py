@@ -89,13 +89,10 @@ async def test_add_individual_parameters():
         mock_resp.validation_failed = False
         mock_resp.validation_reason = None
         mock_resp.error = None
-        mock_resp.success = True
-        mock_resp.individual_id = "var1"
-        mock_resp.class_curie = "GO:0003674"
-        mock_resp.assign_var = "var1"
+        mock_resp.model_vars = {"var1": "gomodel:12345/abc123"}
 
-        # Mock add_individual_validated
-        mock_instance.add_individual_validated.return_value = mock_resp
+        # Mock add_individual with new signature
+        mock_instance.add_individual.return_value = mock_resp
 
         mcp_server._client = None
 
@@ -103,12 +100,12 @@ async def test_add_individual_parameters():
             "model123", "GO:0003674", "molecular_function", "var1"
         )
 
-        # Should use add_individual_validated
-        mock_instance.add_individual_validated.assert_called_once_with(
-            "model123", "GO:0003674", {"id": "GO:0003674", "label": "molecular_function"}, "var1"
+        # Should use add_individual with expected_label parameter
+        mock_instance.add_individual.assert_called_once_with(
+            "model123", "GO:0003674", "var1", expected_label="molecular_function"
         )
         assert result["success"] is True
-        assert result["individual_id"] == "var1"
+        assert result["individual_id"] == "gomodel:12345/abc123"
         assert result["class_curie"] == "GO:0003674"
         assert result["assign_var"] == "var1"
 
@@ -165,6 +162,8 @@ async def test_model_summary_calculations():
 
         from noctua import BaristaResponse
         mock_resp = Mock(spec=BaristaResponse)
+        from noctua.models import Fact
+
         mock_resp.validation_failed = False
         mock_resp.validation_reason = None
         mock_resp.error = None
@@ -172,12 +171,13 @@ async def test_model_summary_calculations():
         mock_resp.individuals = [
             {"id": "i1"}, {"id": "i2"}, {"id": "i3"}, {"id": "i4"}
         ]
+        # Create Fact objects instead of dicts
         mock_resp.facts = [
-            {"property": "RO:0002333"},
-            {"property": "RO:0002333"},
-            {"property": "RO:0002333"},
-            {"property": "RO:0002432"},
-            {"property": "RO:0002434"},
+            Fact(subject="s1", object="o1", property="RO:0002333"),
+            Fact(subject="s2", object="o2", property="RO:0002333"),
+            Fact(subject="s3", object="o3", property="RO:0002333"),
+            Fact(subject="s4", object="o4", property="RO:0002432"),
+            Fact(subject="s5", object="o5", property="RO:0002434"),
         ]
         mock_resp.model_state = "development"
 
