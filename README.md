@@ -4,6 +4,10 @@ MCP server for GO-CAM model editing via the Barista API.
 
 This package provides a thin MCP (Model Context Protocol) wrapper around the [noctua-py](https://github.com/geneontology/noctua-py) library, exposing GO-CAM editing capabilities through a standardized interface.
 
+<a href="https://glama.ai/mcp/servers/@geneontology/noctua-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@geneontology/noctua-mcp/badge" alt="Noctua Server MCP server" />
+</a>
+
 ## Quick Start
 
 Once published:
